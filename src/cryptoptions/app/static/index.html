@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Options101</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="brand">Options101</div>
+    <nav class="coins" id="coins" aria-label="Choose an asset"></nav>
+    <div class="feed" id="feed" aria-live="polite"></div>
+  </header>
+
+  <main class="desk">
+    <section class="chain" aria-labelledby="chain-title">
+      <div class="chain-head">
+        <h1 id="chain-title">Pick an option</h1>
+        <p class="hint">Click an <strong>ask</strong> to buy at that price, or a <strong>bid</strong> to sell (only as part of a spread).</p>
+        <div class="expiries" id="expiries" role="tablist" aria-label="Expiry date"></div>
+        <p class="forward" id="forward"></p>
+      </div>
+      <div class="chain-scroll" id="chain-scroll">
+        <table class="grid" id="chain-table">
+          <thead>
+            <tr class="sides"><th colspan="4">Calls: pay off if the price rises</th><th></th><th colspan="4">Puts: pay off if the price falls</th></tr>
+            <tr>
+              <th title="Price you can sell at">Bid</th><th title="Price you can buy at">Ask</th><th title="Implied volatility at the mark price">IV</th><th title="How much the option moves per 1 unit move in the price">Delta</th>
+              <th class="strike-h">Strike</th>
+              <th title="How much the option moves per 1 unit move in the price">Delta</th><th title="Implied volatility at the mark price">IV</th><th title="Price you can sell at">Bid</th><th title="Price you can buy at">Ask</th>
+            </tr>
+          </thead>
+          <tbody id="chain-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="work" aria-labelledby="pos-title">
+      <div class="sheet">
+        <div class="sheet-head">
+          <h2 id="pos-title">Your position</h2>
+          <div class="pricing">
+            <label><input type="radio" name="price_at" value="market" checked> Price at bid and ask</label>
+            <label><input type="radio" name="price_at" value="mark"> Price at mark</label>
+          </div>
+        </div>
+        <div id="legs" class="legs"></div>
+        <p id="error" class="error" role="alert" hidden></p>
+        <dl id="facts" class="facts" hidden></dl>
+      </div>
+
+      <div class="sheet" id="whatif-sheet" hidden>
+        <h2>What if</h2>
+        <p class="readout" id="readout"></p>
+        <div class="levers">
+          <div class="lever">
+            <label for="move">Price change <output id="move-out"></output></label>
+            <input type="range" id="move" min="-60" max="150" step="0.5" value="0">
+            <details><summary>What this means</summary>
+              <p>Where the price could be. Calls gain as it rises and puts as it falls. A typical week's move is shown under "What matters most" below.</p>
+            </details>
+          </div>
+          <div class="lever">
+            <label for="days">Days from now <output id="days-out"></output></label>
+            <input type="range" id="days" min="0" max="30" step="0.25" value="0">
+            <details><summary>What this means</summary>
+              <p>Waiting costs a buyer money: every day the option loses some value even if the price stands still. This is called time decay, or theta. Being right too late is the most common way option buyers lose.</p>
+            </details>
+          </div>
+          <div class="lever">
+            <label for="iv">Volatility change <output id="iv-out"></output></label>
+            <input type="range" id="iv" min="-40" max="60" step="1" value="0">
+            <details><summary>What this means</summary>
+              <p>How much movement the market expects. When it rises, every option you hold is worth more, and when it falls they are worth less, even with no price change. It often drops sharply after a big event, which is called an IV crush. This lever is held at zero unless you move it.</p>
+            </details>
+          </div>
+          <button type="button" class="reset" id="reset">Reset to today</button>
+        </div>
+      </div>
+
+      <div class="sheet" id="charts-sheet" hidden>
+        <h2>Profit or loss by price</h2>
+        <p class="legend">
+          <span class="key k-today"></span>Today
+          <span class="key k-scen"></span>On your what-if day
+          <span class="key k-exp"></span>At expiry
+        </p>
+        <div id="payoff" class="chart" role="img" aria-label="Profit or loss by price"></div>
+
+        <h2 class="gap">Profit or loss by price and day</h2>
+        <p class="sub">Each cell is the result if the price is there on that day, at your implied volatility setting. Click a cell to make it your what-if.</p>
+        <div id="heat" class="chart heat" role="img" aria-label="Profit or loss by price and day"></div>
+      </div>
+
+      <div class="sheet" id="sens-sheet" hidden>
+        <h2>What matters most this week</h2>
+        <p class="sub">How much each assumption moves your result over the next week, biggest first.</p>
+        <div id="sens" class="sens"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

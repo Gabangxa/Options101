@@ -1,59 +1,72 @@
-# cryptoptions
+# Options101
 
-Pricing core for buying crypto options on Bybit, the first layer of an options calculator and a what-if scenario tool. Positions are long premium only: single calls and puts, straddles, strangles and debit spreads, so the maximum loss is always the premium paid.
+A personal options desk for buying crypto options on Bybit: an option chain with live prices, a position builder, and a what-if tool that shows how price, time and volatility change the result. Positions are long premium only (single calls and puts, straddles, strangles and debit spreads), so the most you can lose is always the premium you paid.
 
-## What is here (milestone 2: pricing core)
+## Launch the app
+
+You need Python 3.11 or newer. On Ubuntu and Debian, use `python3`.
+
+```bash
+git clone https://github.com/Gabangxa/Options101 && cd Options101
+python3 -m venv .venv            # if this fails: sudo apt install python3-venv
+source .venv/bin/activate
+pip install -e ".[app]"
+options101                       # live Bybit prices; opens http://127.0.0.1:8000
+```
+
+Other ways to start it:
+
+```bash
+options101 --demo                # sample prices, works offline
+options101 --port 8080 --no-browser
+python3 -m cryptoptions.app      # same as options101
+```
+
+Next time, only `cd Options101`, `source .venv/bin/activate` and `options101` are needed. Stop the app with Ctrl+C.
+
+## Using it
+
+1. Choose an asset at the top and an expiry date on the left.
+2. Click an **ask** price to buy that option. Click a **bid** to sell one, which is only allowed as part of a spread where a bought option covers it.
+3. Your position shows what you pay, the most you can lose and gain, the break-even price, the market's implied chance of profit, and what crossing the bid to ask spread costs you.
+4. Move the **What if** levers (price change, days from now, volatility change), or click any cell in the price-by-day heatmap, and the sentence at the top explains the result in plain words.
+5. **What matters most this week** ranks which assumption your result depends on most.
+
+Prices refresh every 15 seconds. By default, buys are priced at the ask and sells at the bid, which is what you would actually trade at. Switch to "Price at mark" to see mid-market values.
+
+## What is in the package
 
 | Module | Does |
 | --- | --- |
 | `cryptoptions.black76` | Black-76 price on the forward, Greeks, implied vol solver |
-| `cryptoptions.symbols` | Parses Bybit option symbols (with or without the `-USDT` suffix), time to the 08:00 UTC expiry |
-| `cryptoptions.validation` | Compares the core with Bybit's marks, with no network code |
-| `scripts/validate_bybit.py` | Pulls live chains from Bybit's public API and runs the comparison |
+| `cryptoptions.symbols` | Parses Bybit option symbols, time to the 08:00 UTC expiry |
+| `cryptoptions.position` | Positions of legs, the long-premium rule, P&L grids, break-evens, probability of profit |
+| `cryptoptions.market` | Live chains from Bybit's public API (no key needed), and demo chains |
+| `cryptoptions.app` | FastAPI server and web page |
+| `cryptoptions.validation` and `scripts/validate_bybit.py` | Checks the core's prices and Greeks against Bybit's marks |
 
-Units, chosen to match how Bybit reports Greeks:
+Units, chosen to match Bybit: prices in USDT, volatility as a decimal, time on a 365-day calendar, vega per volatility point, theta per calendar day.
 
-- prices, forward and strike in USDT
-- volatility as a decimal (0.55 = 55%)
-- time in years on a 365-day calendar
-- delta and gamma per 1 USDT move in the forward
-- vega per 1 volatility point
-- theta per calendar day
-
-The core uses only the Python standard library.
-
-## Quick start
+## Checking the maths against Bybit
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python3 scripts/validate_bybit.py --coins BTC ETH --csv misses.csv --save-raw raw/
+```
+
+It prices every listed option with Bybit's own mark IV and checks that the result is within one tick of Bybit's mark price, and that the Greeks agree. It prints `PASS` or `FAIL`, plus a `UNITS?` line if a Greek differs by a fixed factor such as 100 or 365.
+
+## Development
+
+```bash
 pip install -e ".[dev]"
 pytest
 ```
 
-```python
-from cryptoptions import greeks, implied_vol, parse_symbol, year_fraction
-from datetime import datetime, timezone
+## Not yet included
 
-s = parse_symbol("BTC-27NOV26-120000-C-USDT")
-t = year_fraction(s.expiry, datetime.now(timezone.utc))
-g = greeks(forward=108_000, strike=s.strike, t=t, vol=0.50, option_type=s.option_type)
-print(g.price, g.delta, g.vega, g.theta)
-```
+- The dynamic premium cap from the project brief
+- Trading fees in P&L
+- A spot-to-volatility link: the volatility lever moves only when you move it
+- Saved and compared scenarios
 
-## Validating against Bybit (the milestone's acceptance test)
-
-```bash
-python scripts/validate_bybit.py --coins BTC ETH --csv misses.csv --save-raw raw/
-```
-
-For every listed option the script feeds Bybit's mark IV and underlying price into the core and checks:
-
-1. the core's price is within one tick of Bybit's mark price,
-2. Bybit's mark price inverts back to Bybit's mark IV,
-3. the core's delta, gamma, vega and theta match Bybit's.
-
-It prints the ticker field names it received, a per-coin summary, and a `UNITS?` line if a Greek differs by a fixed factor such as 100 or 365, which would mean a unit convention to adjust rather than a pricing bug. It exits with code 1 if fewer than 99% of prices are within one tick. `--save-raw` keeps the responses so a run can be repeated offline with `--from-raw raw/`.
-
-## Next
-
-Milestone 3 is the scenario engine: positions made of legs, P&L and Greeks across spot, time and IV, breakevens, required move, implied probability and the dynamic premium cap.
+This is a learning and analysis tool, not trading advice. Check every number against Bybit before you trade.
