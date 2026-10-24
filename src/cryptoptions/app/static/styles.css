@@ -154,8 +154,21 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.85rem; backgro
 .pricing label { display: flex; gap: 0.35rem; align-items: center; cursor: pointer; }
 .sub, .legend { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.75rem; max-width: 70ch; }
 
-.empty { color: var(--muted); padding: 1.5rem 0 0.5rem; max-width: 52ch; }
-.empty strong { color: var(--ink); }
+.start { padding: 0.5rem 0 0.25rem; display: grid; gap: 1.25rem; }
+.start-lead { font-size: 1.05rem; max-width: 60ch; }
+.steps { margin: 0; padding-left: 1.25rem; color: var(--muted); display: grid; gap: 0.25rem; }
+.steps strong { color: var(--accent); }
+.examples-title { font-weight: 600; margin-bottom: 0.5rem; }
+.example-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 0.5rem; }
+.example {
+  display: grid; gap: 0.1rem; text-align: left; cursor: pointer;
+  border: 1px solid var(--rule); background: var(--panel); border-radius: 8px; padding: 0.65rem 0.8rem;
+}
+.example:hover { border-color: var(--accent); background: var(--accent-soft); }
+.ex-title { font-weight: 600; color: var(--accent); }
+.ex-why { font-size: 0.85rem; color: var(--muted); }
+.preview { border-top: 1px solid var(--rule); padding-top: 1rem; }
+.preview ul { margin: 0; padding-left: 1.25rem; color: var(--muted); display: grid; gap: 0.2rem; }
 
 .legs { margin-top: 0.75rem; display: grid; gap: 0.5rem; }
 .leg {
@@ -230,7 +243,7 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.85rem; backgro
 @media (max-width: 1100px) {
   .desk { grid-template-columns: 1fr; }
   .chain { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--rule); }
-  .chain-scroll { max-height: 60vh; }
+  .chain-scroll { max-height: 42vh; }
   .levers { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {

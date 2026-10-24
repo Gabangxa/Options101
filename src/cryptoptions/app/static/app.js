@@ -148,7 +148,7 @@ async function loadChain() {
       ? state.legExpiry : defaultExpiry(chain);
     renderExpiries();
     renderChain();
-    if (state.legs.length) analyze();
+    if (state.legs.length) analyze(); else renderPosition();
   } catch (e) {
     setFeed("down", e.message);
   } finally {
@@ -174,7 +174,7 @@ function renderExpiries() {
     return el("button", {
       type: "button", role: "tab", "aria-selected": String(e.code === state.expiry),
       disabled: locked, title: locked ? "Your position uses another expiry. Clear it to switch." : null,
-      onclick: () => { state.expiry = e.code; state.scrolledFor = null; renderExpiries(); renderChain(); },
+      onclick: () => { state.expiry = e.code; state.scrolledFor = null; renderExpiries(); renderChain(); if (!state.legs.length) renderPosition(); },
     }, d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }), el("small", {}, dayLabel(e.days)));
   }));
 }
@@ -239,6 +239,14 @@ function addLeg(symbol, side) {
   renderChain();
   renderPosition();
   analyze();
+  revealWork();
+}
+
+function revealWork() {
+  // on narrow screens the position sits below the chain; bring it into view
+  if (window.matchMedia("(max-width: 1100px)").matches) {
+    $("pos-title").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 function removeLeg(symbol) {
@@ -248,6 +256,72 @@ function removeLeg(symbol) {
   renderChain();
   renderPosition();
   if (state.legs.length) analyze();
+}
+
+/* ---------- start panel and example trades ---------- */
+
+function exampleTrades() {
+  const exp = currentExpiry();
+  if (!exp) return [];
+  const rows = exp.rows.filter((r) => r.call && r.put);
+  const fwd = exp.forward;
+  const ok = (q, side) => q && (side === "buy" ? q.ask > 0 : q.bid > 0);
+  const atm = rows.reduce((best, r) => (!best || Math.abs(r.strike - fwd) < Math.abs(best.strike - fwd) ? r : best), null);
+  const above = rows.filter((r) => r.strike > fwd);
+  const below = rows.filter((r) => r.strike < fwd).reverse();
+  const out = [];
+  if (above[0] && ok(above[0].call, "buy")) out.push({
+    title: "Buy a call", why: "You expect the price to rise.",
+    legs: [{ symbol: above[0].call.symbol, side: "buy", quantity: 1 }],
+  });
+  if (below[0] && ok(below[0].put, "buy")) out.push({
+    title: "Buy a put", why: "You expect the price to fall.",
+    legs: [{ symbol: below[0].put.symbol, side: "buy", quantity: 1 }],
+  });
+  if (atm && ok(atm.call, "buy") && ok(atm.put, "buy")) out.push({
+    title: "Buy a straddle", why: "You expect a big move but do not know which way.",
+    legs: [{ symbol: atm.call.symbol, side: "buy", quantity: 1 }, { symbol: atm.put.symbol, side: "buy", quantity: 1 }],
+  });
+  const far = above.slice(2).find((r) => ok(r.call, "sell"));
+  if (above[0] && far && ok(above[0].call, "buy")) out.push({
+    title: "Buy a call spread", why: "You expect a moderate rise and want to pay less.",
+    legs: [{ symbol: above[0].call.symbol, side: "buy", quantity: 1 }, { symbol: far.call.symbol, side: "sell", quantity: 1 }],
+  });
+  return out;
+}
+
+function useExample(ex) {
+  hideError();
+  state.legs = ex.legs.map((l) => ({ ...l }));
+  state.legExpiry = state.expiry;
+  resetLevers();
+  renderExpiries();
+  renderChain();
+  renderPosition();
+  analyze();
+  revealWork();
+}
+
+function renderStart() {
+  const examples = exampleTrades();
+  return el("div", { class: "start" },
+    el("p", { class: "start-lead" }, "Pick an option in the chain to see what it costs, what you could make or lose, and how that changes with price, time and volatility."),
+    el("ol", { class: "steps" },
+      el("li", {}, "Choose an expiry date above the chain."),
+      el("li", {}, "Click an ", el("strong", {}, "ask"), " price to buy that option."),
+      el("li", {}, "Add a second option if you want a straddle, strangle or spread.")),
+    examples.length ? el("div", { class: "examples" },
+      el("p", { class: "examples-title" }, "Or start from an example for this expiry:"),
+      el("div", { class: "example-list" }, ...examples.map((ex) =>
+        el("button", { type: "button", class: "example", onclick: () => useExample(ex) },
+          el("span", { class: "ex-title" }, ex.title), el("span", { class: "ex-why" }, ex.why))))) : null,
+    el("div", { class: "preview" },
+      el("p", { class: "examples-title" }, "Once you pick, this side of the screen shows:"),
+      el("ul", {},
+        el("li", {}, "What you pay, the most you can lose and gain, and your break-even price"),
+        el("li", {}, "What-if levers for price, days and volatility, explained in plain words"),
+        el("li", {}, "A profit chart and a price-by-day heatmap"),
+        el("li", {}, "Which assumption your result depends on most"))));
 }
 
 function describeLeg(symbol) {
@@ -262,11 +336,9 @@ function renderPosition() {
   for (const id of ["whatif-sheet", "charts-sheet", "sens-sheet"]) $(id).hidden = !showWork;
   $("facts").hidden = !showWork;
 
+  document.querySelector(".desk").classList.toggle("has-position", state.legs.length > 0);
   if (!state.legs.length) {
-    box.replaceChildren(el("div", { class: "empty" },
-      el("p", {}, el("strong", {}, "Nothing here yet. "),
-        "Choose an expiry, then click an ask price in the chain to buy that option. ",
-        "Add a second option to build a straddle, a strangle or a spread.")));
+    box.replaceChildren(renderStart());
     return;
   }
   const details = new Map((state.analysis?.legs || []).map((d) => [d.symbol, d]));
