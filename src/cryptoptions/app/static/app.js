@@ -58,6 +58,15 @@ function el(tag, attrs = {}, ...children) {
   for (const c of children.flat()) if (c !== null && c !== undefined) node.append(c.nodeType ? c : String(c));
   return node;
 }
+/* theme colours, read from the CSS tokens so charts follow light and dark mode */
+function C(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(`--${name}`).trim();
+}
+function rgb(hex) {
+  const h = hex.replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  return [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16));
+}
 function svg(tag, attrs = {}) {
   const node = document.createElementNS(SVG, tag);
   for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
@@ -412,7 +421,7 @@ function renderPayoff(a) {
 
   const gx = svg("g", { class: "axis" });
   for (const t of niceTicks(lo, hi, 5)) {
-    gx.append(svg("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), stroke: t === 0 ? "#9aa5b8" : "#eef1f5" }));
+    gx.append(svg("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), stroke: t === 0 ? C("chart-zero") : C("chart-grid") }));
     const lab = svg("text", { x: m.l - 8, y: y(t) + 4, "text-anchor": "end" }); lab.textContent = money(t, a.forward, true); gx.append(lab);
   }
   for (const t of niceTicks(xs[0], xs[xs.length - 1], 6)) {
@@ -425,7 +434,7 @@ function renderPayoff(a) {
   const profitBand = svg("g");
   for (let i = 1; i < xs.length; i++) {
     if (a.curve_at_expiry[i] > 0 && a.curve_at_expiry[i - 1] > 0) {
-      profitBand.append(svg("rect", { x: x(xs[i - 1]), y: m.t, width: x(xs[i]) - x(xs[i - 1]) + 0.5, height: H - m.t - m.b, fill: "#e3f3ee", opacity: "0.55" }));
+      profitBand.append(svg("rect", { x: x(xs[i - 1]), y: m.t, width: x(xs[i]) - x(xs[i - 1]) + 0.5, height: H - m.t - m.b, fill: C("gain-soft"), opacity: "0.55" }));
     }
   }
   root.insertBefore(profitBand, gx);
@@ -434,27 +443,27 @@ function renderPayoff(a) {
     root.append(svg("line", { x1: x(v), x2: x(v), y1: m.t, y2: H - m.b, stroke: color, "stroke-dasharray": dash || "", "stroke-width": 1 }));
     const t = svg("text", { x: x(v) + 4, y: m.t + 11, fill: color }); t.textContent = label; root.append(t);
   };
-  marker(a.forward, "Now", "#5a6680", "2 3");
-  if (Math.abs(a.scenario.forward - a.forward) / a.forward > 0.002) marker(a.scenario.forward, "What-if", "#3442b5", "4 3");
+  marker(a.forward, "Now", C("muted"), "2 3");
+  if (Math.abs(a.scenario.forward - a.forward) / a.forward > 0.002) marker(a.scenario.forward, "What-if", C("accent"), "4 3");
 
   const path = (vals, attrs) => {
     const d = vals.map((v, i) => `${i ? "L" : "M"}${x(xs[i]).toFixed(1)},${y(v).toFixed(1)}`).join("");
     root.append(svg("path", { d, fill: "none", ...attrs }));
   };
-  path(a.curve_today, { stroke: "#5a6680", "stroke-width": 1.5, "stroke-dasharray": "5 4" });
-  path(a.curve_at_expiry, { stroke: "#172036", "stroke-width": 1.75 });
-  path(a.curve_at_scenario_day, { stroke: "#3442b5", "stroke-width": 2.75 });
+  path(a.curve_today, { stroke: C("muted"), "stroke-width": 1.5, "stroke-dasharray": "5 4" });
+  path(a.curve_at_expiry, { stroke: C("ink"), "stroke-width": 1.75 });
+  path(a.curve_at_scenario_day, { stroke: C("accent"), "stroke-width": 2.75 });
 
   for (const b of a.breakevens) {
     if (b < xs[0] || b > xs[xs.length - 1]) continue;
-    root.append(svg("circle", { cx: x(b), cy: y(0), r: 3.5, fill: "#fff", stroke: "#172036", "stroke-width": 1.5 }));
+    root.append(svg("circle", { cx: x(b), cy: y(0), r: 3.5, fill: C("panel"), stroke: C("ink"), "stroke-width": 1.5 }));
   }
-  root.append(svg("circle", { cx: x(a.scenario.forward), cy: y(a.scenario.pnl), r: 5, fill: "#3442b5", stroke: "#fff", "stroke-width": 2 }));
+  root.append(svg("circle", { cx: x(a.scenario.forward), cy: y(a.scenario.pnl), r: 5, fill: C("accent"), stroke: C("dot-ring"), "stroke-width": 2 }));
   $("payoff").replaceChildren(root);
 }
 
 function heatColor(t) {
-  const mid = [247, 248, 250], gain = [18, 122, 99], loss = [181, 63, 54];
+  const mid = rgb(C("heat-mid")), gain = rgb(C("heat-gain")), loss = rgb(C("heat-loss"));
   const s = Math.sign(t) * Math.abs(t) ** 0.7;
   const to = s >= 0 ? gain : loss;
   const k = Math.min(Math.abs(s), 1);
@@ -474,7 +483,7 @@ function renderHeat(a) {
   a.grid_pnl.forEach((row, r) => {
     row.forEach((v, c) => {
       const rect = svg("rect", {
-        class: "cell", x: m.l + c * cw, y: m.t + r * ch, width: cw + 0.3, height: ch + 0.3, fill: heatColor(v / scale),
+        class: "cell", x: m.l + c * cw, y: m.t + r * ch, width: cw + 0.8, height: ch + 0.8, fill: heatColor(v / scale), "shape-rendering": "crispEdges",
       });
       const title = svg("title");
       title.textContent = `${price(a.grid_prices[c], a.forward)} on ${dateLabel(new Date(asOf + a.grid_days[r] * 86400000))}: ${money(v, a.forward, true)} USDT`;
@@ -499,12 +508,12 @@ function renderHeat(a) {
   const xl = svg("text", { x: (m.l + W - m.r) / 2, y: H - 4, "text-anchor": "middle" }); xl.textContent = `${state.coin} price (USDT)`; root.append(xl);
 
   // current price and what-if crosshair
-  root.append(svg("line", { x1: x(a.forward), x2: x(a.forward), y1: m.t, y2: m.t + rows * ch, stroke: "#172036", "stroke-dasharray": "2 3", "pointer-events": "none" }));
+  root.append(svg("line", { x1: x(a.forward), x2: x(a.forward), y1: m.t, y2: m.t + rows * ch, stroke: C("ink"), "stroke-dasharray": "2 3", "pointer-events": "none" }));
   const sx = Math.min(Math.max(x(a.scenario.forward), m.l), W - m.r);
   const sy = m.t + (a.scenario.days_elapsed / Math.max(a.days_to_expiry, 1e-9)) * (rows - 1) * ch + ch / 2;
-  root.append(svg("line", { x1: sx, x2: sx, y1: m.t, y2: m.t + rows * ch, stroke: "#3442b5", "stroke-width": 1.5, "pointer-events": "none" }));
-  root.append(svg("line", { x1: m.l, x2: W - m.r, y1: sy, y2: sy, stroke: "#3442b5", "stroke-width": 1.5, "pointer-events": "none" }));
-  root.append(svg("circle", { cx: sx, cy: sy, r: 6, fill: "#3442b5", stroke: "#fff", "stroke-width": 2, "pointer-events": "none" }));
+  root.append(svg("line", { x1: sx, x2: sx, y1: m.t, y2: m.t + rows * ch, stroke: C("accent"), "stroke-width": 1.5, "pointer-events": "none" }));
+  root.append(svg("line", { x1: m.l, x2: W - m.r, y1: sy, y2: sy, stroke: C("accent"), "stroke-width": 1.5, "pointer-events": "none" }));
+  root.append(svg("circle", { cx: sx, cy: sy, r: 6, fill: C("accent"), stroke: C("dot-ring"), "stroke-width": 2, "pointer-events": "none" }));
   $("heat").replaceChildren(root);
 }
 
@@ -512,7 +521,7 @@ function renderSens(a) {
   const max = Math.max(...a.sensitivities.map((s) => Math.abs(s.pnl)), 1e-9);
   $("sens").replaceChildren(...a.sensitivities.map((s) => {
     const isPrice = s.lever === "price";
-    const color = isPrice ? "#3442b5" : s.pnl >= 0 ? "#127a63" : "#b53f36";
+    const color = isPrice ? C("accent") : s.pnl >= 0 ? C("gain") : C("loss");
     const value = isPrice ? `±${money(s.pnl, a.forward)}` : money(s.pnl, a.forward, true);
     return el("div", { class: "row" },
       el("span", {}, s.label),
@@ -531,6 +540,29 @@ for (const r of document.querySelectorAll('input[name="price_at"]')) {
   r.addEventListener("change", () => { state.priceAt = r.value; analyze(); });
 }
 
+/* light and dark mode */
+const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+function isDark() {
+  const forced = document.documentElement.dataset.theme;
+  return forced ? forced === "dark" : darkQuery.matches;
+}
+function renderTheme() {
+  const dark = isDark();
+  const btn = $("theme-toggle");
+  btn.textContent = dark ? "Light mode" : "Dark mode";
+  btn.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
+  const a = state.analysis;
+  if (a) { renderPayoff(a); renderHeat(a); renderSens(a); }
+}
+$("theme-toggle").addEventListener("click", () => {
+  const next = isDark() ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  safeSet("theme", next);
+  renderTheme();
+});
+darkQuery.addEventListener("change", () => { if (!document.documentElement.dataset.theme) renderTheme(); });
+
+renderTheme();
 updateLeverLabels();
 renderPosition();
 loadCoins();
