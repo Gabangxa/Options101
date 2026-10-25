@@ -53,6 +53,8 @@
 }
 
 * { box-sizing: border-box; }
+/* class rules like .facts { display: grid } would otherwise beat the hidden attribute */
+[hidden] { display: none !important; }
 html, body { margin: 0; }
 body {
   background: var(--paper);
