@@ -238,14 +238,16 @@ function addLeg(symbol, side) {
   renderExpiries();
   renderChain();
   renderPosition();
-  analyze();
-  revealWork();
+  analyze({ reveal: true });
 }
 
 function revealWork() {
   // on narrow screens the position sits below the chain; bring it into view
+  // the sticky header wraps to different heights, so measure it rather than guess
   if (window.matchMedia("(max-width: 1100px)").matches) {
-    $("pos-title").scrollIntoView({ behavior: "smooth", block: "start" });
+    const header = document.querySelector(".bar").offsetHeight;
+    const top = $("pos-title").getBoundingClientRect().top + window.scrollY - header - 12;
+    window.scrollTo({ top, behavior: "smooth" });
   }
 }
 
@@ -298,8 +300,7 @@ function useExample(ex) {
   renderExpiries();
   renderChain();
   renderPosition();
-  analyze();
-  revealWork();
+  analyze({ reveal: true });
 }
 
 function renderStart() {
@@ -380,8 +381,11 @@ function hideError() { $("error").hidden = true; }
 
 let analyzeTimer = null;
 let analyzeSeq = 0;
+// scrolling before the result renders lands short: the page is not full height yet
+let revealAfterAnalyze = false;
 
-function analyze() {
+function analyze({ reveal = false } = {}) {
+  if (reveal) revealAfterAnalyze = true;
   clearTimeout(analyzeTimer);
   analyzeTimer = setTimeout(runAnalyze, 60);
 }
@@ -410,6 +414,8 @@ async function runAnalyze() {
     renderPosition();
     showError(e.message);
   }
+  // reveal on errors too, so the message is not left off-screen
+  if (revealAfterAnalyze) { revealAfterAnalyze = false; revealWork(); }
 }
 
 function syncDaySlider(dte) {
