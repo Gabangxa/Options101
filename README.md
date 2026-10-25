@@ -34,6 +34,13 @@ Next time, only `cd Options101`, `source .venv/bin/activate` and `options101` ar
 
 Prices refresh every 15 seconds. By default, buys are priced at the ask and sells at the bid, which is what you would actually trade at. Switch to "Price at mark" to see mid-market values.
 
+### Gamma trading (optional)
+
+This is off by default, and you can ignore it completely: buying an option works the same with it on or off. Turning it on changes nothing about your position. It adds two readings, places no orders and adds no hedge legs.
+
+- **Break-even daily move.** If you hedged away the direction each day, a bought option would make money from the size of daily price moves and lose a little to time decay every day. This is the daily move at which the two balance, before trading fees and funding on the perpetual. For a single option it is the implied volatility written as a daily move, about 2.5% a day at 48% volatility. It does not apply when the position gains little or nothing from bigger moves, for example a debit spread with the price near or above the strike you sold.
+- **Realized against implied.** The coin's last 30 daily moves on its USDT perpetual, drawn against the break-even line, with the volatility the price actually showed over 7 and 30 days next to the implied volatility your break-even stands for. Past moves are not a forecast.
+
 ## What is in the package
 
 | Module | Does |
@@ -41,7 +48,8 @@ Prices refresh every 15 seconds. By default, buys are priced at the ask and sell
 | `cryptoptions.black76` | Black-76 price on the forward, Greeks, implied vol solver |
 | `cryptoptions.symbols` | Parses Bybit option symbols, time to the 08:00 UTC expiry |
 | `cryptoptions.position` | Positions of legs, the long-premium rule, P&L grids, break-evens, probability of profit |
-| `cryptoptions.market` | Live chains from Bybit's public API (no key needed), and demo chains |
+| `cryptoptions.market` | Live chains and daily closes from Bybit's public API (no key needed), and demo data |
+| `cryptoptions.gamma` | Optional gamma-trading analysis: break-even daily move, realized volatility from daily closes |
 | `cryptoptions.app` | FastAPI server and web page |
 | `cryptoptions.validation` and `scripts/validate_bybit.py` | Checks the core's prices and Greeks against Bybit's marks |
 
@@ -68,5 +76,6 @@ pytest
 - Trading fees in P&L
 - A spot-to-volatility link: the volatility lever moves only when you move it
 - Saved and compared scenarios
+- A hedge simulator for gamma trading: the optional overlay shows the break-even move and past moves, but does not simulate delta hedging
 
 This is a learning and analysis tool, not trading advice. Check every number against Bybit before you trade.

@@ -1,7 +1,7 @@
-"""Option chains: live from Bybit's public API, or synthetic demo data.
+"""Option chains and daily price history: live from Bybit's public API, or synthetic demo data.
 
-Both sources return the same ``Chain`` shape so the app does not care which
-one it is talking to. Demo data is priced with the core itself, using a
+Both sources return the same ``Chain`` and ``PriceHistory`` shapes so the app
+does not care which one it is talking to. Demo data is priced with the core itself, using a
 volatility smile and term structure that look like a crypto market; it is
 for learning the tool and for working offline, not for trading.
 """
@@ -10,19 +10,26 @@ from __future__ import annotations
 
 import json
 import math
+import random
 import statistics
 import threading
 import time
 import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
-from .black76 import OptionType, greeks
-from .symbols import parse_symbol, year_fraction
+from .black76 import DAYS_PER_YEAR, OptionType, greeks
+from .symbols import from_millis, parse_symbol, year_fraction
 
 BYBIT_URL = "https://api.bybit.com"
 CACHE_SECONDS = 15.0
+# A completed daily candle never changes, and a new one appears once a day at
+# 00:00 UTC, so history can be cached far longer than option prices.
+HISTORY_CACHE_SECONDS = 300.0
+# Bybit's "params error". The only kline parameter that varies is the symbol.
+BYBIT_PARAMS_ERROR = 10001
+_DAY_MS = 86_400_000
 
 
 @dataclass
@@ -108,6 +115,31 @@ class Chain:
         }
 
 
+@dataclass(frozen=True)
+class DailyClose:
+    date: date               # the UTC day the candle covers
+    close: float
+
+
+@dataclass
+class PriceHistory:
+    coin: str
+    symbol: str              # the USDT perpetual the closes come from
+    source: str              # "live" or "demo"
+    as_of: datetime
+    closes: list[DailyClose]  # completed days only, oldest first
+
+
+def perpetual_symbol(coin: str) -> str:
+    return f"{coin}USDT"
+
+
+def _check_history_days(days: int) -> None:
+    # Bybit returns at most 1000 candles, and one of them is the forming day.
+    if not 1 <= days <= 999:
+        raise ValueError("days must be between 1 and 999")
+
+
 def _f(row: dict, key: str) -> float:
     try:
         return float(row.get(key) or 0.0)
@@ -160,8 +192,38 @@ def build_chain(coin: str, source: str, tickers: list[dict], ticks: dict[str, fl
     return Chain(coin=coin, source=source, as_of=now, expiries=expiries)
 
 
+def parse_daily_klines(body: dict) -> list[DailyClose]:
+    """Completed daily candles from a Bybit ``/v5/market/kline`` body, oldest first.
+
+    Bybit lists candles newest first, and the newest is the day still in
+    progress: its "close" is only the latest price, so it is dropped. A candle
+    counts as completed once its 24 hours have ended by Bybit's own clock.
+    """
+    try:
+        server_ms = int(body["time"])
+        candles = sorted((int(row[0]), float(row[4])) for row in body["result"]["list"])
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise RuntimeError(f"Bybit kline data was not in the expected shape ({exc!r})") from exc
+    closes = []
+    for start_ms, close in candles:
+        if start_ms + _DAY_MS > server_ms:
+            continue
+        if close <= 0:
+            raise RuntimeError(f"Bybit kline close of {close} is not a price")
+        closes.append(DailyClose(from_millis(start_ms).date(), close))
+    return closes
+
+
 # ---------------------------------------------------------------------------
 # Live source
+
+
+class BybitError(RuntimeError):
+    """Bybit answered, but with an error code instead of data."""
+
+    def __init__(self, path: str, code: object, message: object):
+        super().__init__(f"Bybit {path} returned {code}: {message}")
+        self.code = code
 
 
 class BybitSource:
@@ -177,15 +239,19 @@ class BybitSource:
         url = f"{self.base_url}{path}?{urllib.parse.urlencode(params)}"
         req = urllib.request.Request(url, headers={"User-Agent": "options101/0.2"})
         with urllib.request.urlopen(req, timeout=15) as resp:
-            body = json.load(resp)
+            try:
+                body = json.load(resp)
+            except ValueError as exc:   # e.g. an HTML error page from a proxy in front of Bybit
+                raise RuntimeError(f"Bybit {path} did not answer with JSON") from exc
         if body.get("retCode") != 0:
-            raise RuntimeError(f"Bybit {path} returned {body.get('retCode')}: {body.get('retMsg')}")
+            raise BybitError(path, body.get("retCode"), body.get("retMsg"))
         return body
 
-    def _cached(self, key: str, loader):
+    def _cached(self, key: str, loader, ttl: float | None = None):
+        ttl = self.cache_seconds if ttl is None else ttl
         with self._lock:
             hit = self._cache.get(key)
-            if hit and time.monotonic() - hit[0] < self.cache_seconds:
+            if hit and time.monotonic() - hit[0] < ttl:
                 return hit[1]
         value = loader()
         with self._lock:
@@ -219,6 +285,31 @@ class BybitSource:
             return build_chain(coin, "live", tickers["result"]["list"], ticks, now)
         return self._cached(f"chain:{coin}", load)
 
+    def history(self, coin: str, days: int = 31) -> PriceHistory:
+        """The last ``days`` completed daily closes of the coin's USDT perpetual, oldest first.
+
+        The default of 31 closes gives a month of 30 daily moves.
+        """
+        _check_history_days(days)
+        symbol = perpetual_symbol(coin)
+
+        def load():
+            # One extra candle, because the newest one is still forming and is dropped.
+            params = {"category": "linear", "symbol": symbol, "interval": "D", "limit": days + 1}
+            try:
+                body = self._get("/v5/market/kline", params)
+            except BybitError as exc:
+                if exc.code == BYBIT_PARAMS_ERROR:
+                    raise KeyError(f"No USDT perpetual for {coin}") from exc
+                raise
+            # Parse first: it turns a malformed body into a Bybit error, not a missing key.
+            closes = parse_daily_klines(body)
+            return PriceHistory(
+                coin=coin, symbol=symbol, source="live", as_of=from_millis(body["time"]),
+                closes=closes[-days:],
+            )
+        return self._cached(f"history:{coin}:{days}", load, ttl=HISTORY_CACHE_SECONDS)
+
 
 # ---------------------------------------------------------------------------
 # Demo source
@@ -231,6 +322,9 @@ _DEMO_MARKETS = {
     "SOL": (191.4, 0.78, 0.15, 1.0),
     "XRP": (2.43, 0.82, 0.18, 1.1),
 }
+# Implied volatility usually trades a little above what the market then
+# realizes, so the demo price path moves somewhat less than its options imply.
+_DEMO_REALIZED_TO_IMPLIED = 0.9
 
 
 def _nice_step(x: float) -> float:
@@ -299,3 +393,28 @@ class DemoSource:
                             "vega": g.vega, "theta": g.theta, "openInterest": 0,
                         })
         return build_chain(coin, "demo", rows, {}, now)
+
+    def history(self, coin: str, days: int = 31) -> PriceHistory:
+        """Synthetic completed daily closes, oldest first, ending yesterday (UTC).
+
+        The default of 31 closes gives a month of 30 daily moves.
+        """
+        _check_history_days(days)
+        if coin not in _DEMO_MARKETS:
+            raise KeyError(f"No demo market for {coin}")
+        spot, atm, _, _ = _DEMO_MARKETS[coin]
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        # Seeded by coin alone, so every request sees the same path. It is walked
+        # backwards from the demo spot so yesterday's close sits where the chain trades.
+        rng = random.Random(coin)
+        daily_sd = _DEMO_REALIZED_TO_IMPLIED * atm / math.sqrt(DAYS_PER_YEAR)
+        newest_first = [spot]
+        for _ in range(days - 1):
+            newest_first.append(newest_first[-1] * math.exp(-rng.gauss(0.0, daily_sd)))
+        today = now.date()
+        closes = [
+            DailyClose(today - timedelta(days=age), close)
+            for age, close in enumerate(newest_first, start=1)
+        ]
+        closes.reverse()
+        return PriceHistory(coin=coin, symbol=perpetual_symbol(coin), source="demo", as_of=now, closes=closes)

@@ -9,6 +9,8 @@ const state = {
   priceAt: "market",
   analysis: null,
   scrolledFor: null,
+  gammaOn: safeGet("gamma") === "on",  // optional overlay; off unless the user turned it on
+  history: {},           // per coin: {data, error, fetchedAt} from /api/history
 };
 
 const $ = (id) => document.getElementById(id);
@@ -334,7 +336,7 @@ function describeLeg(symbol) {
 function renderPosition() {
   const box = $("legs");
   const showWork = state.legs.length > 0 && state.analysis;
-  for (const id of ["whatif-sheet", "charts-sheet", "sens-sheet"]) $(id).hidden = !showWork;
+  for (const id of ["whatif-sheet", "charts-sheet", "sens-sheet", "gamma-sheet"]) $(id).hidden = !showWork;
   $("facts").hidden = !showWork;
 
   document.querySelector(".desk").classList.toggle("has-position", state.legs.length > 0);
@@ -408,6 +410,7 @@ async function runAnalyze() {
     renderPayoff(result);
     renderHeat(result);
     renderSens(result);
+    renderGamma();
   } catch (e) {
     if (seq !== analyzeSeq) return;
     state.analysis = null;
@@ -608,6 +611,191 @@ function renderSens(a) {
   }));
 }
 
+/* ---------- gamma trading (optional) ---------- */
+
+// Analysis only: it never changes the position, and while it is off it makes no requests.
+// A new daily close appears once a day, so ten minutes old is still fresh enough.
+const HISTORY_MAX_AGE_MS = 10 * 60 * 1000;
+// renderGamma runs after every analyze, so a failed fetch waits a while before trying again
+const HISTORY_RETRY_MS = 60 * 1000;
+let historySeq = 0;
+let historyLoading = null;  // coin with a history request in flight
+
+function historyIsStale(coin) {
+  const entry = state.history[coin];
+  if (!entry) return true;
+  return Date.now() - entry.fetchedAt > (entry.error ? HISTORY_RETRY_MS : HISTORY_MAX_AGE_MS);
+}
+
+async function loadHistory(coin) {
+  if (historyLoading === coin) return;
+  historyLoading = coin;
+  const seq = ++historySeq;
+  let entry;
+  try {
+    entry = { data: await api(`/api/history/${coin}`), error: null, fetchedAt: Date.now() };
+  } catch (e) {
+    // keep the last good days on screen, so a failed refresh does not blank the chart
+    entry = { data: state.history[coin]?.data ?? null, error: e.message, fetchedAt: Date.now() };
+  }
+  if (seq !== historySeq) return;  // a request for another coin has started since
+  historyLoading = null;
+  state.history[coin] = entry;
+  if (coin === state.coin) renderGamma();
+}
+
+function renderGamma() {
+  // a fault in the optional overlay stays in its own sheet: it must never clear the core analysis
+  try {
+    drawGamma();
+  } catch (e) {
+    console.error(e);
+    $("gamma-readout").replaceChildren(`Gamma trading could not be shown: ${e.message}`);
+    $("gamma-history").replaceChildren();
+  }
+}
+
+function drawGamma() {
+  const on = state.gammaOn;
+  const toggle = $("gamma-toggle");
+  // the label says what a press does, so the state is announced as shown or hidden, not as pressed
+  toggle.setAttribute("aria-expanded", String(on));
+  toggle.textContent = on ? "Turn off" : "Turn on";
+  $("gamma-body").hidden = !on;
+  const readout = $("gamma-readout"), past = $("gamma-history");
+  const a = state.analysis;
+  if (!on || !a) { readout.replaceChildren(); past.replaceChildren(); return; }
+  const g = a.gamma_trading;
+  if (!g) {
+    // the page is served fresh from disk, so it can be newer than a server started earlier
+    readout.replaceChildren("Restart Options101 to see gamma trading: the server running now is older than this page.");
+    past.replaceChildren();
+    return;
+  }
+  if (!g.long_gamma) {
+    readout.replaceChildren(
+      "Gamma trading does not apply to this position at today's price: once hedged, a move in either ",
+      "direction would earn it little or nothing, or cost it. It works with bought calls, puts, straddles and strangles.");
+    past.replaceChildren();
+    return;
+  }
+  if (g.breakeven_move === 0) {
+    // with no break-even line there is nothing to hold past moves against
+    readout.replaceChildren("At today's price this position is not losing value to time decay, so there is no daily move it has to beat.");
+    past.replaceChildren();
+    return;
+  }
+  // theta is a rate: with under a day left, a full day of it can be more than the option is still worth
+  const lastDay = a.days_to_expiry < 1;
+  readout.replaceChildren(
+    `${lastDay ? "To keep up with time decay" : "To pay for one day of time decay"}, ${state.coin} needs to move about `,
+    el("b", {}, `±${money(g.breakeven_move, a.forward)} USDT`), ` (±${pct(g.breakeven_move_pct, 2, false)}) a day. `,
+    lastDay ? "Less than a day is left before expiry, so this is how fast the option is losing value now, not a full day's cost. "
+      : "This assumes you re-hedge once a day with the perpetual future: bigger days pay, smaller days cost. ",
+    "Trading fees on each re-hedge and funding on the perpetual are not included.");
+  const coin = state.coin;
+  if (historyIsStale(coin)) loadHistory(coin);
+  const entry = state.history[coin];
+  past.replaceChildren(...(entry ? historyView(coin, entry, a, g)
+    : [el("p", { class: "sub" }, `Loading the last 30 days of ${coin} prices…`)]));
+}
+
+function historyView(coin, entry, a, g) {
+  const out = [];
+  const h = entry.data;
+  const be = g.breakeven_move_pct;
+  // The implied volatility the break-even line stands for: one option's own IV, and for a spread
+  // each leg's IV weighted by its gamma. reference_iv weights the bought legs by premium, so with
+  // skew it can land on the other side of realized from the line drawn below.
+  const beVol = be / 100 * Math.sqrt(365);
+  if (h && h.days.length) {
+    const vol = (v) => `${(100 * v).toFixed(1)}%`;
+    const n = h.days.length;
+    const bigger = h.days.filter((d) => Math.abs(d.move_pct) > be).length;
+    out.push(
+      el("p", {}, "Your break-even works out to ", el("b", {}, vol(beVol)), " implied volatility. ",
+        h.realized_vol_30d == null ? `There is not yet a full 30 days of ${coin} prices to compare it with.`
+          : [`Over the last 30 days ${coin} realized `, el("b", {}, vol(h.realized_vol_30d)),
+            h.realized_vol_7d == null ? "." : ` (last 7 days: ${vol(h.realized_vol_7d)}).`]),
+      el("p", {}, "On ", el("b", {}, `${bigger} of the last ${n} days`), " it moved more than your break-even.",
+        h.rms_daily_move_pct_30d == null ? "" : ` A typical day moved about ±${pct(h.rms_daily_move_pct_30d, 2, false)}.`),
+      // each key wraps together with its label on narrow screens
+      el("p", { class: "legend" },
+        el("span", { class: "legend-item" }, el("span", { class: "key k-bigger" }), "Moved more than break-even"),
+        el("span", { class: "legend-item" }, el("span", { class: "key k-smaller" }), "Moved less"),
+        el("span", { class: "legend-item" }, el("span", { class: "key k-be" }), `Break-even ±${pct(be, 2, false)}`)),
+      el("div", {
+        class: "chart moves", role: "img",
+        "aria-label": `How far ${coin} moved each day over the last ${n} days: ${bigger} moved more than your break-even of ±${pct(be, 2, false)}`,
+      }, movesChart(h.days, be)),
+      el("p", { class: "sub" },
+        `Each bar is one day's move of the ${h.symbol} perpetual future, up or down, from one daily close to the next (UTC). `,
+        "These are past moves, not a forecast.",
+        h.source === "demo" ? " Demo data: a made-up price path, not real history." : ""));
+  } else if (h) {
+    out.push(el("p", { class: "sub" }, `No daily prices are available for ${coin} yet.`));
+  }
+  if (entry.error) {
+    out.push(el("p", { class: "error" }, `Recent daily prices did not load: ${entry.error} `,
+      el("button", {
+        type: "button", class: "retry",
+        onclick: (ev) => { ev.currentTarget.disabled = true; loadHistory(coin); },
+      }, "Try again")));
+  }
+  return out;
+}
+
+// history dates are UTC days; formatting them in local time could show the day before
+function utcDayLabel(iso, opts = { day: "numeric", month: "short" }) {
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", { ...opts, timeZone: "UTC" });
+}
+
+// rounded at the tip, square at the baseline
+function barPath(x, top, w, base) {
+  const r = Math.min(4, w / 2, base - top);
+  return `M${x},${base}V${top + r}A${r},${r} 0 0 1 ${x + r},${top}H${x + w - r}A${r},${r} 0 0 1 ${x + w},${top + r}V${base}Z`;
+}
+
+function movesChart(days, be) {
+  const W = 760, H = 230, m = { l: 52, r: 64, t: 12, b: 32 };
+  const sizes = days.map((d) => Math.abs(d.move_pct));
+  const hi = Math.max(...sizes, be, 0.1) * 1.12;
+  const base = H - m.b;
+  const slot = (W - m.l - m.r) / days.length;
+  const bw = Math.min(slot * 0.68, 24);
+  const y = (v) => m.t + (hi - v) / hi * (base - m.t);
+  const root = svg("svg", { viewBox: `0 0 ${W} ${H}` });
+
+  for (const t of niceTicks(0, hi, 4)) {
+    root.append(svg("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), stroke: t === 0 ? C("chart-zero") : C("chart-grid") }));
+    const lab = svg("text", { x: m.l - 8, y: y(t) + 4, "text-anchor": "end" }); lab.textContent = `${t}%`; root.append(lab);
+  }
+
+  // the quiet bars reuse the recessive grey of the zero line, so the days that beat break-even stand out
+  const gain = C("gain"), quiet = C("chart-zero");
+  days.forEach((d, i) => {
+    const size = sizes[i];
+    const x0 = m.l + i * slot;
+    const day = svg("g", { class: "day" });
+    const tip = svg("title");
+    tip.textContent = `${utcDayLabel(d.date, { weekday: "short", day: "numeric", month: "short" })}: `
+      + `${d.move_pct >= 0 ? "up" : "down"} ${size.toFixed(2)}%, closed at ${price(d.close)} USDT`;
+    // the whole column answers the pointer, not just the painted bar
+    day.append(tip,
+      svg("rect", { class: "hit", x: x0, y: m.t, width: slot, height: base - m.t, fill: "transparent" }),
+      svg("path", { d: barPath(x0 + (slot - bw) / 2, y(size), bw, base), fill: size > be ? gain : quiet }));
+    root.append(day);
+    // a date every week, counted back from the newest day so it is always labelled
+    if ((days.length - 1 - i) % 7 === 0) {
+      const lab = svg("text", { x: x0 + slot / 2, y: base + 18, "text-anchor": "middle" }); lab.textContent = utcDayLabel(d.date); root.append(lab);
+    }
+  });
+
+  root.append(svg("line", { x1: m.l, x2: W - m.r, y1: y(be), y2: y(be), stroke: C("ink"), "stroke-width": 1.5, "stroke-dasharray": "5 4", "pointer-events": "none" }));
+  const lab = svg("text", { x: W - m.r + 6, y: y(be) + 4 }); lab.textContent = `±${pct(be, 2, false)}`; root.append(lab);
+  return root;
+}
+
 /* ---------- wiring ---------- */
 
 for (const id of ["move", "days", "iv"]) {
@@ -617,6 +805,11 @@ $("reset").addEventListener("click", () => { resetLevers(); analyze(); });
 for (const r of document.querySelectorAll('input[name="price_at"]')) {
   r.addEventListener("change", () => { state.priceAt = r.value; analyze(); });
 }
+$("gamma-toggle").addEventListener("click", () => {
+  state.gammaOn = !state.gammaOn;
+  safeSet("gamma", state.gammaOn ? "on" : "off");
+  renderGamma();
+});
 
 /* light and dark mode */
 const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
@@ -630,7 +823,7 @@ function renderTheme() {
   btn.textContent = dark ? "Light mode" : "Dark mode";
   btn.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
   const a = state.analysis;
-  if (a) { renderPayoff(a); renderHeat(a); renderSens(a); }
+  if (a) { renderPayoff(a); renderHeat(a); renderSens(a); renderGamma(); }
 }
 $("theme-toggle").addEventListener("click", () => {
   const next = isDark() ? "light" : "dark";
@@ -642,5 +835,6 @@ darkQuery.addEventListener("change", () => { if (!document.documentElement.datas
 
 renderTheme();
 updateLeverLabels();
+renderGamma();
 renderPosition();
 loadCoins();

@@ -105,6 +105,26 @@
         <p class="sub">How much each assumption moves your result over the next week, biggest first.</p>
         <div id="sens" class="sens"></div>
       </div>
+
+      <div class="sheet" id="gamma-sheet" hidden>
+        <div class="sheet-head">
+          <div class="titled">
+            <h2 id="gamma-title">Gamma trading</h2>
+            <span class="tag">Optional</span>
+          </div>
+          <button type="button" class="toggle" id="gamma-toggle" aria-expanded="false" aria-controls="gamma-body">Turn on</button>
+        </div>
+        <p class="sub intro">Extra numbers, off by default. Turning them on places no trades and does not change your position.</p>
+        <div class="gamma" id="gamma-body" hidden>
+          <p class="sub">A strategy you can choose on top of a bought option: hedge it each day with the perpetual future, so that a move in either direction can pay.</p>
+          <p class="readout" id="gamma-readout"></p>
+          <div class="gamma-history" id="gamma-history"></div>
+          <details><summary>What this means</summary>
+            <p>A bought option gains more from a move than it loses from the same move the other way. Each day you would buy or sell the perpetual future so that small price changes no longer move your total. What is left is a gain from how far the price moved, up or down, against the time decay you pay every day.</p>
+            <p>Implied volatility is the movement the option prices assume, and your break-even is that number written as a daily move. Realized volatility is how much the price actually moved, measured the same way. When realized beats implied, the daily gains outrun the decay; when it falls short, the decay wins. Nothing here places orders or adds the hedge to your position.</p>
+          </details>
+        </div>
+      </div>
     </section>
   </main>
 

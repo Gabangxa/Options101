@@ -216,11 +216,12 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.85rem; backgro
 .lever label { display: flex; justify-content: space-between; gap: 0.5rem; font-weight: 600; font-size: 0.9rem; }
 .lever output { font-weight: 500; color: var(--accent); white-space: nowrap; }
 .lever input[type=range] { width: 100%; accent-color: var(--accent); margin: 0.5rem 0 0.25rem; }
-.lever details { font-size: 0.82rem; color: var(--muted); }
-.lever summary { cursor: pointer; width: fit-content; }
-.lever details p { margin-top: 0.35rem; }
-.reset { grid-column: 1 / -1; justify-self: start; border: 1px solid var(--rule); background: var(--panel); border-radius: 6px; padding: 0.3rem 0.8rem; cursor: pointer; font-size: 0.85rem; }
-.reset:hover { border-color: var(--accent); }
+.lever details, .gamma details { font-size: 0.82rem; color: var(--muted); }
+.lever summary, .gamma summary { cursor: pointer; width: fit-content; }
+.lever details p, .gamma details p { margin-top: 0.35rem; }
+.reset, .toggle { border: 1px solid var(--rule); background: var(--panel); border-radius: 6px; padding: 0.3rem 0.8rem; cursor: pointer; font-size: 0.85rem; }
+.reset:hover, .toggle:hover { border-color: var(--accent); }
+.reset { grid-column: 1 / -1; justify-self: start; }
 
 /* charts */
 .legend { display: flex; align-items: center; gap: 0.4rem 0.9rem; flex-wrap: wrap; }
@@ -239,6 +240,33 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.85rem; backgro
 .sens .track { height: 10px; background: var(--track); border-radius: 5px; overflow: hidden; }
 .sens .fill { height: 100%; border-radius: 5px; }
 .sens .val { min-width: 6.5rem; text-align: right; font-weight: 600; }
+
+/* gamma trading (optional) */
+.titled { display: flex; align-items: baseline; gap: 0.5rem; }
+.tag {
+  font-size: 0.72rem; font-weight: 600; color: var(--muted);
+  border: 1px solid var(--rule); border-radius: 999px; padding: 0.05rem 0.5rem;
+}
+.toggle[aria-expanded="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+/* the sentence is the last line of the closed sheet, so it should not add space below */
+.sub.intro { margin-bottom: 0; }
+.gamma { display: grid; gap: 1rem; margin-top: 1rem; }
+.gamma-history { display: grid; gap: 0.6rem; }
+.gamma-history > p { max-width: 72ch; }
+/* the grid gap spaces these, so their own bottom margin would double it */
+.gamma > .sub, .gamma-history .legend, .gamma-history .sub { margin-bottom: 0; }
+.legend-item { display: inline-flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
+.legend-item .key { margin-right: 0; }
+.k-bigger, .k-smaller { width: 10px; height: 10px; border-top: 0; border-radius: 2px; }
+.k-bigger { background: var(--gain); }
+.k-smaller { background: var(--chart-zero); }
+.k-be { border-color: var(--ink); border-top-style: dashed; }
+.moves g.day:hover rect.hit { fill: var(--rule-soft); }
+.retry {
+  margin-left: 0.25rem; border: 1px solid currentColor; background: transparent; color: inherit;
+  border-radius: 6px; padding: 0.05rem 0.5rem; cursor: pointer; font-size: 0.85rem;
+}
+.retry:disabled { opacity: 0.6; cursor: default; }
 
 .foot { color: var(--muted); font-size: 0.8rem; }
 

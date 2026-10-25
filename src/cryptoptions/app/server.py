@@ -12,11 +12,14 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from ..gamma import breakeven_move, daily_moves_pct, gross_gamma, realized_vol, rms_move_pct
 from ..market import BybitSource, DemoSource
 from ..position import Leg, Position, PositionError
 from ..symbols import parse_symbol
 
 STATIC = Path(__file__).parent / "static"
+# Daily moves shown against the break-even line; one more close than that is fetched.
+HISTORY_MOVES = 30
 
 
 class LegIn(BaseModel):
@@ -38,11 +41,15 @@ def create_app(demo: bool = False) -> FastAPI:
     source = DemoSource() if demo else BybitSource()
     app = FastAPI(title="Options101", docs_url="/api/docs", redoc_url=None)
 
-    def load_chain(coin: str):
+    def from_source(fetch, not_found: str):
+        # One mapping from source errors to HTTP errors, shared by the chain, analyze and history endpoints.
         try:
-            return source.chain(coin.upper())
+            return fetch()
         except KeyError as exc:
-            raise HTTPException(404, f"No options found for {coin}.") from exc
+            raise HTTPException(404, not_found) from exc
+        except urllib.error.HTTPError as exc:
+            # Before URLError, which it subclasses: Bybit was reached and answered with an error status.
+            raise HTTPException(502, f"Bybit answered with an error: HTTP {exc.code} {exc.reason}.") from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise HTTPException(
                 503,
@@ -51,6 +58,9 @@ def create_app(demo: bool = False) -> FastAPI:
             ) from exc
         except RuntimeError as exc:
             raise HTTPException(502, str(exc)) from exc
+
+    def load_chain(coin: str):
+        return from_source(lambda: source.chain(coin.upper()), f"No options found for {coin}.")
 
     @app.get("/api/status")
     def status():
@@ -66,6 +76,28 @@ def create_app(demo: bool = False) -> FastAPI:
     @app.get("/api/chain/{coin}")
     def chain(coin: str):
         return load_chain(coin).to_dict()
+
+    @app.get("/api/history/{coin}")
+    def history(coin: str):
+        coin = coin.upper()
+        past = from_source(
+            lambda: source.history(coin, days=HISTORY_MOVES + 1),
+            f"No daily price history found for {coin}.",
+        )
+        closes = [c.close for c in past.closes]
+        moves = daily_moves_pct(closes)
+        # Each move belongs to the day it ended on, so the oldest close only anchors the first move.
+        shown = list(zip(past.closes[1:], moves))[-HISTORY_MOVES:]
+        return {
+            "coin": past.coin,
+            "symbol": past.symbol,
+            "source": past.source,
+            "as_of": past.as_of.isoformat(),
+            "days": [{"date": c.date.isoformat(), "close": c.close, "move_pct": m} for c, m in shown],
+            "realized_vol_7d": realized_vol(closes, 7),
+            "realized_vol_30d": realized_vol(closes, 30),
+            "rms_daily_move_pct_30d": rms_move_pct(closes, 30),
+        }
 
     @app.post("/api/analyze")
     def analyze(body: AnalyzeIn):
@@ -111,6 +143,9 @@ def create_app(demo: bool = False) -> FastAPI:
             forward, chain.as_of, move_pct=body.move_pct,
             days_elapsed=body.days_elapsed, iv_change=body.iv_change,
         )
+        # Optional overlay, read from today's Greeks. It only adds numbers; the position is unchanged.
+        today = result.now
+        move = breakeven_move(today.gamma, today.theta, gross_gamma(position, forward, chain.as_of))
         out = asdict(result)
         out.update({
             "legs": details,
@@ -119,6 +154,13 @@ def create_app(demo: bool = False) -> FastAPI:
             "as_of": chain.as_of.isoformat(),
             "reference_iv": position.reference_vol(),
             "source": chain.source,
+            "gamma_trading": {
+                "long_gamma": move is not None,
+                "breakeven_move": move,
+                "breakeven_move_pct": None if move is None else 100.0 * move / forward,
+                "gamma": today.gamma,
+                "theta": today.theta,
+            },
         })
         return out
 
