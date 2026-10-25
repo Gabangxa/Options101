@@ -154,6 +154,9 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.85rem; backgro
 .sheet-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
 .pricing { display: flex; gap: 1rem; font-size: 0.85rem; color: var(--muted); }
 .pricing label { display: flex; gap: 0.35rem; align-items: center; cursor: pointer; }
+.pricing { flex-wrap: wrap; }
+.fee-rate input { width: 4.2rem; padding: 0.1rem 0.35rem; border: 1px solid var(--rule); border-radius: 6px; text-align: right; background: var(--panel); }
+.fee-rate input:disabled { opacity: 0.5; }
 .sub, .legend { color: var(--muted); font-size: 0.875rem; margin-bottom: 0.75rem; max-width: 70ch; }
 
 .start { padding: 0.5rem 0 0.25rem; display: grid; gap: 1.25rem; }

@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from ..gamma import breakeven_move, daily_moves_pct, gross_gamma, realized_vol, rms_move_pct
 from ..market import BybitSource, DemoSource
-from ..position import Leg, Position, PositionError
+from ..position import FeeSchedule, Leg, Position, PositionError
 from ..symbols import parse_symbol
 
 STATIC = Path(__file__).parent / "static"
@@ -35,6 +35,8 @@ class AnalyzeIn(BaseModel):
     days_elapsed: float = Field(0.0, ge=0)
     iv_change: float = Field(0.0, ge=-90, le=200)
     price_at: str = Field("market", pattern="^(market|mark)$")
+    include_fees: bool = True
+    fee_rate_pct: float = Field(0.03, ge=0, le=1)   # trading fee rate, percent of the index price
 
 
 def create_app(demo: bool = False) -> FastAPI:
@@ -134,8 +136,9 @@ def create_app(demo: bool = False) -> FastAPI:
                 "entry_price": entry, "mark": quote.mark, "mark_iv": quote.mark_iv,
                 "spread_iv_points": quote.spread_iv_points,
             })
+        fees = FeeSchedule.bybit(body.coin, legs[0].expiry, body.fee_rate_pct / 100) if body.include_fees and legs else None
         try:
-            position = Position(legs)
+            position = Position(legs, fees, index=forward)
         except PositionError as exc:
             raise HTTPException(422, str(exc)) from exc
 
@@ -161,6 +164,9 @@ def create_app(demo: bool = False) -> FastAPI:
                 "gamma": today.gamma,
                 "theta": today.theta,
             },
+            "fee_rate_pct": body.fee_rate_pct if fees else 0.0,
+            "delivery_fee_rate_pct": fees.delivery_rate * 100 if fees else 0.0,
+            "delivery_fee_applies": bool(fees and fees.charge_delivery),
         })
         return out
 

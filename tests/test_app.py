@@ -172,3 +172,15 @@ def test_bybit_answering_with_a_web_page_is_a_bad_gateway(live_client, path):
     r = live.get(path)
     assert r.status_code == 502
     assert "JSON" in r.json()["detail"]
+
+
+def test_fees_on_by_default_and_can_be_switched_off():
+    _, above = pick()
+    legs = [{"symbol": above[0].call.symbol, "side": "buy", "quantity": 1}]
+    on = client.post("/api/analyze", json={"coin": "BTC", "legs": legs}).json()
+    off = client.post("/api/analyze", json={"coin": "BTC", "legs": legs, "include_fees": False}).json()
+    assert on["fees_included"] and not off["fees_included"]
+    assert on["entry_fees"] > 0 and off["entry_fees"] == 0
+    assert on["max_loss"] == pytest.approx(off["max_loss"] + on["entry_fees"])
+    cheaper = client.post("/api/analyze", json={"coin": "BTC", "legs": legs, "fee_rate_pct": 0.02}).json()
+    assert cheaper["entry_fees"] < on["entry_fees"]

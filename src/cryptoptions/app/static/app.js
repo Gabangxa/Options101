@@ -7,6 +7,8 @@ const state = {
   legs: [],              // {symbol, side, quantity}
   legExpiry: null,       // expiry code shared by all legs
   priceAt: "market",
+  feesOn: safeGet("feesOn") !== "false",
+  feeRate: Number(safeGet("feeRate") || "0.03"),
   analysis: null,
   scrolledFor: null,
   gammaOn: safeGet("gamma") === "on",  // optional overlay; off unless the user turned it on
@@ -398,6 +400,7 @@ async function runAnalyze() {
   try {
     const result = await api("/api/analyze", {
       coin: state.coin, legs: state.legs, price_at: state.priceAt,
+      include_fees: state.feesOn, fee_rate_pct: state.feeRate,
       move_pct: Number($("move").value), days_elapsed: Number($("days").value), iv_change: Number($("iv").value),
     });
     if (seq !== analyzeSeq) return;
@@ -444,17 +447,27 @@ function resetLevers() {
 
 function renderFacts(a) {
   const ref = a.forward;
+  const fees = a.fees_included;
   const be = a.breakevens.map((b, i) => `${price(b, ref)} (${pct(a.breakeven_moves[i])})`).join(" or ");
-  const spreadCost = -a.now.pnl;
+  const exitCost = -a.now.pnl;
+  const settlement = !fees ? ""
+    : a.delivery_fee_applies ? ` If it expires in the money, a ${a.delivery_fee_rate_pct.toFixed(3).replace(/0+$/, "")}% settlement fee applies instead.`
+    : " No settlement fee on daily options.";
   const items = [
-    ["You pay", `${money(a.net_premium, ref)} USDT`, `${pct(100 * a.net_premium / (a.forward * Math.max(...a.legs.map((l) => l.quantity))), 2, false)} of the ${state.coin} price`],
-    ["Most you can lose", `${money(a.max_loss, ref)} USDT`, "if the options expire worthless"],
-    ["Most you can gain", a.max_gain == null ? "No limit" : `${money(a.max_gain, ref)} USDT`, a.max_gain == null ? "grows as the price keeps rising" : "capped by the option you sold"],
-    ["Break-even at expiry", be || "none", "price needed at expiry to get your money back"],
+    ["You pay", `${money(a.net_premium + a.entry_fees, ref)} USDT`,
+      fees ? `premium ${money(a.net_premium, ref)} plus fees ${money(a.entry_fees, ref)}`
+        : `${pct(100 * a.net_premium / (a.forward * Math.max(...a.legs.map((l) => l.quantity))), 2, false)} of the ${state.coin} price`],
+    ["Most you can lose", `${money(a.max_loss, ref)} USDT`, fees ? "if the options expire worthless, fees included" : "if the options expire worthless"],
+    ["Most you can gain", a.max_gain == null ? "No limit" : `${money(a.max_gain, ref)} USDT`,
+      a.max_gain == null ? "grows as the price keeps rising" : fees ? "capped by the option you sold, after fees" : "capped by the option you sold"],
+    ["Break-even at expiry", be || "none", fees ? "price needed at expiry to get your money back, after fees" : "price needed at expiry to get your money back"],
     ["Chance of profit at expiry", `${(a.prob_profit_at_expiry * 100).toFixed(0)}%`, `as priced by the market, at ${(a.reference_iv * 100).toFixed(0)}% implied volatility`],
-    ["Cost of the bid to ask spread", `${money(spreadCost, ref)} USDT`, "lost if you sold back immediately"],
   ];
-  if (state.priceAt === "mark") items.pop();
+  if (fees) items.push(["Trading fees", `${money(a.entry_fees, ref)} USDT`,
+    `to open, at ${a.fee_rate_pct}%. About ${money(a.exit_fees_now, ref)} more to close before expiry.${settlement}`]);
+  if (state.priceAt === "market" || fees) items.push(["Cost to get out today", `${money(exitCost, ref)} USDT`,
+    state.priceAt === "market" && fees ? "bid to ask spread plus fees to open and close"
+      : fees ? "fees to open and close" : "the bid to ask spread"]);
   $("facts").replaceChildren(...items.map(([dt, dd, small]) =>
     el("div", {}, el("dt", {}, dt), el("dd", {}, dd, el("small", {}, small)))));
 }
@@ -473,6 +486,7 @@ function renderReadout(a) {
     atExpiry ? "" : ` and ${ivText}`,
     `, the position is worth `, el("b", {}, `${money(s.value, ref)} USDT`), `: a `,
     el("b", { class: gain ? "pos" : "neg" }, `${gain ? "gain" : "loss"} of ${money(Math.abs(s.pnl), ref)}`),
+    a.fees_included ? " after fees" : "",
     ` (${pct(s.pnl_pct_of_premium, 0)} of what you paid).`);
 }
 
@@ -802,6 +816,20 @@ for (const id of ["move", "days", "iv"]) {
   $(id).addEventListener("input", () => { updateLeverLabels(); analyze(); });
 }
 $("reset").addEventListener("click", () => { resetLevers(); analyze(); });
+$("fees-on").checked = state.feesOn;
+$("fee-rate").value = String(state.feeRate);
+$("fee-rate").disabled = !state.feesOn;
+$("fees-on").addEventListener("change", (ev) => {
+  state.feesOn = ev.target.checked;
+  $("fee-rate").disabled = !state.feesOn;
+  safeSet("feesOn", String(state.feesOn));
+  analyze();
+});
+$("fee-rate").addEventListener("change", (ev) => {
+  const v = Number(ev.target.value);
+  if (v >= 0 && v <= 1) { state.feeRate = v; safeSet("feeRate", String(v)); analyze(); }
+  else ev.target.value = String(state.feeRate);
+});
 for (const r of document.querySelectorAll('input[name="price_at"]')) {
   r.addEventListener("change", () => { state.priceAt = r.value; analyze(); });
 }

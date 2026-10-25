@@ -79,3 +79,53 @@ def test_rejects_mixed_expiries():
     other = Leg(OptionType.CALL, 100_000, EXP + timedelta(days=7), 1, 1, 1000, 0.5)
     with pytest.raises(PositionError, match="expiry"):
         Position([leg("C", 100_000), other])
+
+
+# ---- fees -------------------------------------------------------------------
+
+from cryptoptions.position import FeeSchedule  # noqa: E402
+
+
+def test_fee_formulas_match_bybit_examples():
+    maker = FeeSchedule(trade_rate=0.0002)
+    # Bybit help centre: 0.3 BTC call, index 42,000
+    assert maker.trade(42_000, 3_000, 0.3) == pytest.approx(2.52)   # rate x index binds
+    assert maker.trade(42_000, 30, 0.3) == pytest.approx(0.63)      # 7% of premium binds
+    fees = FeeSchedule(delivery_rate=0.00015)
+    assert fees.delivery(46_000, 1_050, 0.3) == pytest.approx(2.07)
+    assert fees.delivery(40_000, 2_950, 0.3) == pytest.approx(1.8)
+    assert fees.delivery(40_000, 0.0, 0.3) == 0.0                    # expired worthless: no fee
+
+
+def test_bybit_schedule_by_coin_and_expiry():
+    friday = datetime(2026, 11, 6, 8, tzinfo=timezone.utc)
+    tuesday = datetime(2026, 11, 3, 8, tzinfo=timezone.utc)
+    assert FeeSchedule.bybit("BTC", friday).delivery_rate == 0.00015
+    assert FeeSchedule.bybit("SOL", friday).delivery_rate == 0.0002
+    assert FeeSchedule.bybit("BTC", friday).charge_delivery
+    assert not FeeSchedule.bybit("BTC", tuesday).charge_delivery
+
+
+def test_fees_reduce_pnl_and_move_breakeven():
+    legs = [leg("C", 110_000)]
+    plain = Position(legs)
+    fees = FeeSchedule()
+    paid = Position(legs, fees, index=F)
+    entry = fees.trade(F, legs[0].entry_price, 1)
+    assert paid.entry_fees == pytest.approx(entry)
+    assert paid.max_loss() == pytest.approx(plain.net_premium + entry)
+    assert paid.breakevens()[0] > plain.breakevens()[0]
+    a = paid.analyze(F, NOW)
+    # closing straight away costs the opening and closing fees
+    assert a.now.pnl == pytest.approx(-(entry + a.exit_fees_now), rel=1e-9)
+    # expiry row of the grid includes the settlement fee
+    for px, v in zip(a.grid_prices, a.grid_pnl[-1]):
+        assert v == pytest.approx(paid.payoff_at_expiry(px), abs=1e-6)
+    deep = 150_000
+    assert paid.payoff_at_expiry(deep) == pytest.approx(
+        plain.payoff_at_expiry(deep) - entry - fees.delivery(deep, deep - 110_000, 1))
+
+
+def test_fees_need_an_index():
+    with pytest.raises(ValueError):
+        Position([leg("C", 110_000)], FeeSchedule())

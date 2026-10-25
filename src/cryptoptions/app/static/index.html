@@ -50,6 +50,9 @@
           <div class="pricing">
             <label><input type="radio" name="price_at" value="market" checked> Price at bid and ask</label>
             <label><input type="radio" name="price_at" value="mark"> Price at mark</label>
+            <label><input type="checkbox" id="fees-on" checked> Include Bybit fees</label>
+            <label class="fee-rate" title="Bybit's regular rate is 0.03% for orders that fill immediately and 0.02% for limit orders that wait on the book">Fee rate
+              <input type="number" id="fee-rate" min="0" max="1" step="0.005" value="0.03" aria-label="Trading fee rate in percent">%</label>
           </div>
         </div>
         <div id="legs" class="legs"></div>

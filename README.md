@@ -41,6 +41,15 @@ This is off by default, and you can ignore it completely: buying an option works
 - **Break-even daily move.** If you hedged away the direction each day, a bought option would make money from the size of daily price moves and lose a little to time decay every day. This is the daily move at which the two balance, before trading fees and funding on the perpetual. For a single option it is the implied volatility written as a daily move, about 2.5% a day at 48% volatility. It does not apply when the position gains little or nothing from bigger moves, for example a debit spread with the price near or above the strike you sold.
 - **Realized against implied.** The coin's last 30 daily moves on its USDT perpetual, drawn against the break-even line, with the volatility the price actually showed over 7 and 30 days next to the implied volatility your break-even stands for. Past moves are not a forecast.
 
+### Fees
+
+Bybit's option fees are included by default, using the method on Bybit's [fee help page](https://www.bybit.com/en/help-center/article/Bybit-Option-Fees-Explained):
+
+- Trading fee, when you open and when you close early: the smaller of (fee rate x index price) and (7% x option price), per contract. The default rate is 0.03%, the regular rate for orders that fill immediately; set 0.02% if you use limit orders that wait on the book, or your own VIP rate.
+- Settlement fee, only on options that expire in the money: the smaller of (0.015% for BTC and ETH, 0.02% for other coins, x index price) and (12.5% x the option's value at expiry). Daily options have none; the app treats any expiry that is not on a Friday as a daily.
+
+Every result (what you pay, the most you can lose and gain, break-evens, charts, the heatmap and the what-if sentence) is after fees. Untick "Include Bybit fees" to see results without them. The index price is approximated by the forward for that expiry.
+
 ## What is in the package
 
 | Module | Does |
@@ -73,7 +82,6 @@ pytest
 ## Not yet included
 
 - The dynamic premium cap from the project brief
-- Trading fees in P&L
 - A spot-to-volatility link: the volatility lever moves only when you move it
 - Saved and compared scenarios
 - A hedge simulator for gamma trading: the optional overlay shows the break-even move and past moves, but does not simulate delta hedging
